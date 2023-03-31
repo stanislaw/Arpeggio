@@ -62,8 +62,8 @@ class NoMatch(Exception):
     match is not successful.
 
     Args:
-        rules (list of ParsingExpression): Rules that are tried at the position
-            of the exception.
+        rules (list of Union[ParsingExpression, NoMatch]): Rules that are tried
+            at the position of the exception.
         position (int): A position in the input stream where exception
             occurred.
         parser (Parser): An instance of a parser.
@@ -72,43 +72,69 @@ class NoMatch(Exception):
         self.rules = rules
         self.position = position
         self.parser = parser
+        self.line = None
+        self.col = None
+        self.several_positions = None
+        self.failed_position = position
 
+        failed_position_different = False
+        for rule_or_nomatch in self.rules:
+            if isinstance(rule_or_nomatch, NoMatch):
+                if not failed_position_different:
+                    if self.failed_position < rule_or_nomatch.failed_position:
+                        self.failed_position = rule_or_nomatch.failed_position
+                        failed_position_different = True
+                else:
+                    if (
+                        self.position < rule_or_nomatch.failed_position < self.failed_position
+                    ):
+                        self.failed_position = rule_or_nomatch.failed_position
+
+    def get_diagnostics(self):
+        raise NotImplementedError()
+
+    def get_diagnostics_and_position(self):
+        diagnostics = self.get_diagnostics()
+        line, col = self.parser.pos_to_linecol(self.failed_position)
+        position = f"at position ({line}, {col})"
+        return diagnostics + " " + position
 
     def eval_attrs(self):
         """
         Call this to evaluate `message`, `context`, `line` and `col`. Called by __str__.
         """
-        def rule_to_exp_str(rule):
-            if hasattr(rule, '_exp_str'):
-                # Rule may override expected report string
-                return rule._exp_str
-            elif rule.root:
-                return rule.rule_name
-            elif isinstance(rule, Match) and \
-                    not isinstance(rule, EndOfFile):
-                return "'{}'".format(rule.to_match)
-            else:
-                return rule.name
 
-        if not self.rules:
-            self.message = "Not expected input"
+        assert (
+            self.rules and len(self.rules) > 0
+        ), "Is there a case when we don't have failed rules?"
+
+        several_positions = self.position != self.failed_position
+        messages = []
+        if several_positions:
+            for rule_or_no_match in self.rules:
+                messages.append(rule_or_no_match.get_diagnostics_and_position())
         else:
-            what_is_expected = OrderedDict.fromkeys(
-                ["{}".format(rule_to_exp_str(r)) for r in self.rules])
-            what_str = " or ".join(what_is_expected)
-            self.message = "Expected {}".format(what_str)
+            for rule_or_no_match in self.rules:
+                messages.append(rule_or_no_match.get_diagnostics())
+        what_str = " or ".join(messages)
 
-        self.context = self.parser.context(position=self.position)
-        self.line, self.col = self.parser.pos_to_linecol(self.position)
+        self.message = "Expected {}".format(what_str)
+        self.context = self.parser.context(position=self.failed_position)
+        self.line, self.col = self.parser.pos_to_linecol(self.failed_position)
+        self.several_positions = several_positions
 
     def __str__(self):
         self.eval_attrs()
-        return "{} at position {}{} => '{}'."\
-            .format(self.message,
-                    "{}:".format(self.parser.file_name)
-                    if self.parser.file_name else "",
-                    (self.line, self.col),
-                    self.context)
+        message = self.message
+        file_name_part_or_none = (
+            "{}: ".format(self.parser.file_name) if self.parser.file_name else ""
+        )
+        at_position_part = (
+            f"at position {(self.line, self.col)} "
+            if not self.several_positions
+            else ""
+        )
+        return f"{file_name_part_or_none}{message} {at_position_part}=> '{self.context}'."
 
     def __unicode__(self):
         return self.__str__()
@@ -123,6 +149,58 @@ def flatten(_iterable):
         else:
             result.append(e)
     return result
+
+
+# WIP: Creating dedicated *NoMatch classes to simplify debugging of the failed
+# rules.
+# Question: Do you see value in maintaining these for each entity, such as:
+# StrMatch -> StringNoMatch, Not -> NotNoMatch, ...
+# I see the advantage of much better visualization of what's happening.
+
+class StringNoMatch(NoMatch):
+    """The simplest of all NoMatch classes. It simply stores a StrMatch node."""
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class OptionalNoMatch(NoMatch):
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class NotNoMatch(NoMatch):
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class EOFNoMatch(NoMatch):
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class SequenceNoMatch(NoMatch):
+    # Sequence fails if there is not a single match, however, there are also
+    # failed optionals that might be hit along the way, so using "or".
+    def get_diagnostics(self):
+        return " or ".join(map(lambda r: r.get_diagnostics(), self.rules))
+
+
+class OrderedChoiceNoMatch(NoMatch):
+    def get_diagnostics(self):
+        return " or ".join(map(lambda r: r.get_diagnostics(), self.rules))
+
+
+class UnorderedGroupNoMatch(NoMatch):
+    def get_diagnostics(self):
+        # Question:
+        # Here, we need to understand how to present that the failed members
+        # of the group have failed. For now, it is "or" but should this be
+        # "a | b | c"?
+        return " or ".join(map(lambda r: r.get_diagnostics(), self.rules))
 
 
 class DebugPrinter(object):
@@ -301,7 +379,6 @@ class ParsingExpression(object):
             if self.suppress or (type(result) is list and
                                  result and result[0] is None):
                 result = None
-
         except NoMatch:
             parser.position = c_pos  # Backtracking
             # Memoize NoMatch at this position for this rule
@@ -374,15 +451,27 @@ class Sequence(ParsingExpression):
         # Prefetching
         append = results.append
 
+        unmatched_optionals = []
         try:
             for e in self.nodes:
                 result = e.parse(parser)
                 if result is not None:
-                    append(result)
-
-        except NoMatch:
+                    # Special case: handling optional.
+                    if isinstance(result, tuple):
+                        if result[0] is not None:
+                            append(result[0])
+                        else:
+                            unmatched_optionals.append(
+                                result[1]
+                            )
+                    else:
+                        append(result)
+        except NoMatch as no_match_exc:
             parser.position = c_pos     # Backtracking
-            raise
+            parser.nm = SequenceNoMatch(
+                unmatched_optionals + [no_match_exc], c_pos, parser
+            )
+            raise parser.nm
 
         finally:
             if self.ws is not None:
@@ -392,6 +481,15 @@ class Sequence(ParsingExpression):
 
         if results:
             return results
+
+    def get_diagnostics(self):
+        if len(self.nodes) == 1:
+            return self.nodes[0].get_diagnostics()
+        return (
+            "("
+            + " AND ".join(map(lambda n: n.get_diagnostics(), self.nodes))
+            + ")"
+        )
 
 
 class OrderedChoice(Sequence):
@@ -412,14 +510,33 @@ class OrderedChoice(Sequence):
             old_skipws = parser.skipws
             parser.skipws = self.skipws
 
+        failed_rules = []
         try:
             for e in self.nodes:
                 try:
                     result = e.parse(parser)
-                    match = True
-                    result = [result]
-                    break
-                except NoMatch:
+
+                    # WIP: tuple is what Optional returns.
+                    exc = None
+                    if isinstance(result, tuple):
+                        result, exc = result
+                    if exc is not None:
+                        failed_rules.append(exc)
+                    else:
+                        # WIP: Special case Not returns None.
+                        if result is None:
+                            failed_rules.append(
+                                NotNoMatch([e], parser.position, parser)
+                            )
+                    if result is not None:
+                        match = True
+                        result = [result]
+                        break
+
+                    # WIP: Do we really want this?
+                    # break
+                except NoMatch as no_match:
+                    failed_rules.append(no_match)
                     parser.position = c_pos  # Backtracking
         finally:
             if self.ws is not None:
@@ -428,9 +545,20 @@ class OrderedChoice(Sequence):
                 parser.skipws = old_skipws
 
         if not match:
-            parser._nm_raise(self, c_pos, parser)
+            assert len(failed_rules) > 0
+            parser.nm = OrderedChoiceNoMatch(failed_rules, c_pos, parser)
+            raise parser.nm
 
         return result
+
+    def get_diagnostics(self):
+        if len(self.nodes) == 1:
+            return self.nodes.get_diagnostics()
+        return (
+            "("
+            + " OR ".join(map(lambda n: n.get_diagnostics(), self.nodes))
+            + ")"
+        )
 
 
 class Repetition(ParsingExpression):
@@ -453,14 +581,18 @@ class Optional(Repetition):
     """
     def _parse(self, parser):
         result = None
+        no_match_exc = None
         c_pos = parser.position
 
         try:
             result = [self.nodes[0].parse(parser)]
-        except NoMatch:
+        except NoMatch as no_match_exc_:
             parser.position = c_pos  # Backtracking
+            no_match_exc = OptionalNoMatch([no_match_exc_], c_pos, parser)
+        return result, no_match_exc
 
-        return result
+    def get_diagnostics(self):
+        return self.nodes[0].get_diagnostics()
 
 
 class ZeroOrMore(Repetition):
@@ -491,6 +623,12 @@ class ZeroOrMore(Repetition):
                     if sep_result:
                         append(sep_result)
                 result = p(parser)
+
+                # WIP: Parsing optional returns tuple.
+                if isinstance(result, tuple):
+                    result = result[0]
+                if not result:
+                    break
                 append(result)
             except NoMatch:
                 parser.position = c_pos  # Backtracking
@@ -592,6 +730,9 @@ class UnorderedGroup(Repetition):
             for e in list(nodes_to_try):
                 try:
                     result = e.parse(parser)
+                    # WIP: Handling optional.
+                    if isinstance(result, tuple):
+                        result, _ = result
                     if result:
                         if sep_exc:
                             raise sep_exc
@@ -619,12 +760,16 @@ class UnorderedGroup(Repetition):
 
         if not match:
             # Unsuccessful match of the whole PE - full backtracking
+            # WIP: We are reporting the un-tried nodes at the current position
+            # of the parser. Question: This seems to be reasonable?
+            parser.nm = UnorderedGroupNoMatch(nodes_to_try, parser.position, parser)
             parser.position = c_pos
-            parser._nm_raise(self, c_pos, parser)
-
+            raise parser.nm
         if results:
             return results
 
+    def get_diagnostics(self):
+        raise NotImplementedError
 
 class SyntaxPredicate(ParsingExpression):
     """
@@ -666,10 +811,18 @@ class Not(SyntaxPredicate):
                 except NoMatch:
                     parser.position = c_pos
                     return
+            # WIP: If there was a match, we want to report the parser's actual
+            # position
+
+            parser.nm = NotNoMatch([self], parser.position, parser)
             parser.position = c_pos
-            parser._nm_raise(self, c_pos, parser)
+            raise parser.nm
         finally:
             parser.in_not = old_in_not
+
+    def get_diagnostics(self):
+        nodes_str = self.nodes[0].get_diagnostics()
+        return f"not({nodes_str})"
 
 
 class Empty(SyntaxPredicate):
@@ -856,7 +1009,12 @@ class RegExMatch(Match):
         else:
             if parser.debug:
                 parser.dprint("-- NoMatch at {}".format(c_pos))
-            parser._nm_raise(self, c_pos, parser)
+            # WIP: Create a specific NoMatch class.
+            parser.nm = NoMatch([self], c_pos, parser)
+            raise parser.nm
+
+    def get_diagnostics(self):
+        return "/" + self.to_match + "/"
 
 
 class StrMatch(Match):
@@ -887,7 +1045,9 @@ class StrMatch(Match):
                     "++ Match '{}' at {} => '{}'"
                     .format(self.to_match, c_pos,
                             parser.context(len(self.to_match))))
-            parser.position += len(self.to_match)
+
+            if not parser.in_not:
+                parser.position += len(self.to_match)
 
             # If this match is inside sequence than mark for suppression
             suppress = type(parser.last_pexpression) is Sequence
@@ -899,7 +1059,8 @@ class StrMatch(Match):
                     "-- No match '{}' at {} => '{}'"
                     .format(self.to_match, c_pos,
                             parser.context(len(self.to_match))))
-            parser._nm_raise(self, c_pos, parser)
+            parser.nm = StringNoMatch([self], c_pos, parser)
+            raise parser.nm
 
     def __str__(self):
         return self.to_match
@@ -913,6 +1074,8 @@ class StrMatch(Match):
     def __hash__(self):
         return hash(self.to_match)
 
+    def get_diagnostics(self):
+        return f"'{self.to_match}'"
 
 
 # HACK: Kwd class is a bit hackish. Need to find a better way to
@@ -946,8 +1109,12 @@ class EndOfFile(Match):
         else:
             if parser.debug:
                 parser.dprint("!! EOF not matched.")
-            parser._nm_raise(self, c_pos, parser)
 
+            parser.nm = EOFNoMatch([self], c_pos, parser)
+            raise parser.nm
+
+    def get_diagnostics(self):
+        return "EOF"
 
 def EOF():
     return EndOfFile()
@@ -1408,10 +1575,6 @@ class Parser(DebugPrinter):
             traversed.
     """
 
-    # Not marker for NoMatch rules list. Used if the first unsuccessful rule
-    # match is Not.
-    FIRST_NOT = Not()
-
     def __init__(self, skipws=True, ws=None, reduce_tree=False, autokwd=False,
                  ignore_case=False, memoization=False, **kwargs):
         """
@@ -1519,9 +1682,6 @@ class Parser(DebugPrinter):
         try:
             self.parse_tree = self._parse()
         except NoMatch as e:
-            # Remove Not marker
-            if e.rules[0] is Parser.FIRST_NOT:
-                del e.rules[0]
             # Get line and column from position
             e.line, e.col = self.pos_to_linecol(e.position)
             raise
@@ -1698,28 +1858,6 @@ class Parser(DebugPrinter):
                 text(self.input[position:position + 10]))
 
         return retval.replace('\n', ' ').replace('\r', '')
-
-    def _nm_raise(self, *args):
-        """
-        Register new NoMatch object if the input is consumed
-        from the last NoMatch and raise last NoMatch.
-
-        Args:
-            args: A NoMatch instance or (value, position, parser)
-        """
-
-        rule, position, parser = args
-        if self.nm is None or not parser.in_parse_comments:
-            if self.nm is None or position > self.nm.position:
-                if self.in_not:
-                    self.nm = NoMatch([Parser.FIRST_NOT], position, parser)
-                else:
-                    self.nm = NoMatch([rule], position, parser)
-            elif position == self.nm.position and isinstance(rule, Match) \
-                    and not self.in_not:
-                self.nm.rules.append(rule)
-
-        raise self.nm
 
     def _clear_caches(self):
         """

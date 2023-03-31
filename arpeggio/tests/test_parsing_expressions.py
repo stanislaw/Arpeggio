@@ -119,11 +119,13 @@ def test_unordered_group_with_optionals():
     parsed = parser.parse("a c")
     assert str(parsed) == "a | c | "
 
-    with pytest.raises(NoMatch):
+    with pytest.raises(NoMatch) as e:
         parser.parse("a b c b")
+    assert "Expected EOF at position (1, 7)" in str(e.value)
 
-    with pytest.raises(NoMatch):
+    with pytest.raises(NoMatch) as e:
         parser.parse("a b ")
+    assert "Expected 'c' at position (1, 4)" in str(e.value)
 
 
 def test_unordered_group_with_optionals_and_separator():

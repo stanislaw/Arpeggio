@@ -39,7 +39,7 @@ def test_non_optional_precedence_1():
 
     with pytest.raises(NoMatch) as e:
         parser.parse('c')
-    assert "(Optional('a') AND 'b') at position (1, 1)" in str(e.value)
+    assert "'a' or 'b' at position (1, 1)" in str(e.value)
     assert (e.value.line, e.value.col) == (1, 1)
 
 
@@ -56,7 +56,7 @@ def test_non_optional_precedence_2():
     with pytest.raises(NoMatch) as e:
         parser.parse('c')
 
-    assert "('b' OR Optional('a'))" in str(e.value)
+    assert "Expected 'b' or 'a' at position (1, 1)" in str(e.value)
     assert (e.value.line, e.value.col) == (1, 1)
 
 
@@ -80,8 +80,13 @@ def test_optional_with_better_match():
     # of Sequence.
     #     assert "Expected 'five'" in str(e.value)
     #     assert (e.value.line, e.value.col) == (1, 20)
-    assert "Expected (('one' AND 'two' AND 'three' AND '4') OR Optional(('one' AND 'two' AND 'three' AND 'four' AND 'five')))" in str(e.value)
-    assert (e.value.line, e.value.col) == (1, 1)
+    # WIP: TODO: FULL STRING MATCH
+    assert (
+       "Expected '4' at position (1, 15)"
+       " or "
+       "'five' at position (1, 20)" in str(e.value)
+    )
+    assert (e.value.line, e.value.col) == (1, 15)
 
 
 def test_alternative_added():
@@ -97,10 +102,9 @@ def test_alternative_added():
 
     with pytest.raises(NoMatch) as e:
         parser.parse('   three ident')
-    assert "Expected (('one' OR 'two') AND /\\w+/)" in str(e.value)
+    assert "Expected 'one' or 'two'" in str(e.value)
 
-    # WIP: Should be (1, 4)
-    assert (e.value.line, e.value.col) == (1, 1)
+    assert (e.value.line, e.value.col) == (1, 4)
 
 
 def test_file_name_reporting():
@@ -114,10 +118,9 @@ def test_file_name_reporting():
 
     with pytest.raises(NoMatch) as e:
         parser.parse("\n\n   a c", file_name="test_file.peg")
-    assert "Expected (Optional('a') AND 'b' AND EOF) at position test_file.peg:(1, 1)" in str(e.value)
-    assert (e.value.line, e.value.col) == (1, 1)
-    # assert "Expected 'b' at position test_file.peg:(3, 6)" in str(e.value)
-    # assert (e.value.line, e.value.col) == (3, 6)
+    # WIP: Repetition of "at position"
+    assert "Expected 'b' at position (3, 6) at position test_file.peg:(3, 6)" in str(e.value)
+    assert (e.value.line, e.value.col) == (3, 6)
 
 
 def test_comment_matching_not_reported():
@@ -132,10 +135,8 @@ def test_comment_matching_not_reported():
 
     with pytest.raises(NoMatch) as e:
         parser.parse('\n\n a // This is a comment \n c')
-    assert "Expected (Optional('a') AND 'b' AND EOF)" in str(e.value)
-    assert (e.value.line, e.value.col) == (1, 1)
-    # assert "Expected 'b' at position (4, 2)" in str(e.value)
-    # assert (e.value.line, e.value.col) == (4, 2)
+    assert "Expected 'b' at position (4, 2) at position (4, 2)" in str(e.value)
+    assert (e.value.line, e.value.col) == (4, 2)
 
 
 def test_not_basic_match():
@@ -147,7 +148,7 @@ def test_not_basic_match():
     with pytest.raises(NoMatch) as e:
         _ = parser.parse('bar')
 
-    assert "Expected (NOT('bar') AND 'foo')" in str(e.value)
+    assert "Expected not('bar') at position (1, 1)" in str(e.value)
 
 
 def test_not_match_at_beginning():
@@ -164,8 +165,8 @@ def test_not_match_at_beginning():
     with pytest.raises(NoMatch) as e:
         parser.parse('   one ident')
     assert (
-        "Expected (NOT('one') AND /\\w+/) at position (1, 1) => '*   one ide'."
-        == str(e.value)
+        "Expected not('one') at position (1, 4) at position (1, 4)"
+        in str(e.value)
     )
 
 
@@ -185,7 +186,7 @@ def test_not_match_as_alternative():
 
     with pytest.raises(NoMatch) as e:
         parser.parse('   three ident')
-    assert "Expected (('one' OR NOT('two')) AND /\\w+/)" in str(e.value)
+    assert "Expected 'one' at position (1, 4) at position (1, 4)" in str(e.value)
 
 
 def test_sequence_of_nots():
@@ -200,7 +201,7 @@ def test_sequence_of_nots():
 
     with pytest.raises(NoMatch) as e:
         parser.parse('   two ident')
-    assert "Expected (NOT('one') AND NOT('two') AND /\\w+/)" in str(e.value)
+    assert "Expected not('two') at position (1, 4) at position (1, 4)" in str(e.value)
 
 
 def test_compound_not_match():
@@ -214,8 +215,11 @@ def test_compound_not_match():
 
     with pytest.raises(NoMatch) as e:
         parser.parse('   three ident')
-    assert "Expected ((NOT(('two' OR 'three')) OR 'one' OR 'two') AND /\\w+/)" in str(e.value)
+    assert (
+        "Expected not(('two' OR 'three')) or 'one' or 'two' "
+        "at position (1, 4) at position (1, 4)"
+    ) in str(e.value)
 
     with pytest.raises(NoMatch) as e:
         parser.parse('   four ident')
-    assert "Expected ((NOT(('two' OR 'three')) OR 'one' OR 'two') AND /\\w+/)" in str(e.value)
+    assert "Expected 'one' or 'two' at position (1, 4) at position (1, 4)" in str(e.value)

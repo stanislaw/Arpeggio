@@ -61,14 +61,24 @@ def test_unordered_group():
     assert str(parsed) == "b | a | c | "
     assert repr(parsed) == "[  'b' [0],  'a' [2],  'c' [4], EOF [5] ]"
 
-    with pytest.raises(NoMatch):
+    with pytest.raises(NoMatch) as e:
         parser.parse("a b a c")
+    assert (
+       "Expected 'c' at position (1, 4) => 'a b* a c'."
+    ) == str(e.value)
 
-    with pytest.raises(NoMatch):
+    with pytest.raises(NoMatch) as e:
         parser.parse("a c")
+    assert (
+       "Expected 'b' at position (1, 4) => 'a c*'."
+    ) == str(e.value)
 
+    # WIP: Strange
     with pytest.raises(NoMatch):
         parser.parse("b b a c")
+    assert (
+       "Expected 'b' at position (1, 4) => 'b b* a c'."
+    ) == str(e.value)
 
 
 def test_unordered_group_with_separator():
@@ -119,11 +129,13 @@ def test_unordered_group_with_optionals():
     parsed = parser.parse("a c")
     assert str(parsed) == "a | c | "
 
-    with pytest.raises(NoMatch):
+    with pytest.raises(NoMatch) as e:
         parser.parse("a b c b")
+    assert "Expected EOF at position (1, 7)" in str(e.value)
 
-    with pytest.raises(NoMatch):
+    with pytest.raises(NoMatch) as e:
         parser.parse("a b ")
+    assert "Expected 'c' at position (1, 4)" in str(e.value)
 
 
 def test_unordered_group_with_optionals_and_separator():

@@ -54,9 +54,11 @@ def test_optional_with_better_match():
         parser.parse('one two three four 5')
 
     assert (
-       "Expected 'five' at position (1, 20) => 'hree four *5'."
-    ) == str(e.value)
-    assert (e.value.line, e.value.col) == (1, 20)
+        "Expected "
+        "'4' at position (1, 15) or 'five' or 'six' at position (1, 20) => "
+        "'two three *four 5'."
+    ) in str(e.value)
+    assert (e.value.line, e.value.col) == (1, 15)
 
 
 def test_alternative_added():
@@ -90,7 +92,7 @@ def test_file_name_reporting():
     with pytest.raises(NoMatch) as e:
         parser.parse("\n\n   a c", file_name="test_file.peg")
     assert (
-        "Expected 'b' at position test_file.peg:(3, 6) => '     a *c'."
+        "test_file.peg: Expected 'b' at position (3, 6) => '     a *c'."
     ) == str(e.value)
     assert (e.value.line, e.value.col) == (3, 6)
 
@@ -128,9 +130,7 @@ def test_not_match_at_beginning():
         parser.parse('   one ident')
     # FIXME: It would be great to have the error reported at (1, 4) because the
     # whitespace is consumed.
-    assert (
-        "Not expected input at position (1, 1) => '*   one ide'."
-    ) == str(e.value)
+    assert "Expected not('one') at position (1, 4) => '   *one ident'." == str(e.value)
 
 
 def test_not_match_as_alternative():
@@ -147,7 +147,7 @@ def test_not_match_as_alternative():
     with pytest.raises(NoMatch) as e:
         parser.parse('   two ident')
     assert (
-        "Expected 'one' at position (1, 4) => '   *two ident'."
+        "Expected 'one' or not('two') at position (1, 4) => '   *two ident'."
     ) == str(e.value)
 
 
@@ -164,7 +164,8 @@ def test_sequence_of_nots():
     with pytest.raises(NoMatch) as e:
         parser.parse('   two ident')
     assert (
-        "Not expected input at position (1, 4) => '   *two ident'."
+       "Expected "
+       "not('one') or not('two') at position (1, 4) => '   *two ident'."
     ) == str(e.value)
 
 
@@ -180,7 +181,9 @@ def test_compound_not_match():
     with pytest.raises(NoMatch) as e:
         parser.parse('   three ident')
     assert (
-        "Expected 'one' or 'two' at position (1, 4) => '   *three iden'."
+        "Expected "
+        "not('two' or 'three') or 'one' or 'two' at position (1, 4) => "
+        "'   *three iden'."
     ) == str(e.value)
 
     parser.parse('   four ident')
@@ -225,7 +228,9 @@ def test_reporting_newline_symbols_when_not_matched():
     with pytest.raises(NoMatch) as e:
         _ = parser.parse('first')
 
-    assert "Expected '\\n' at position (1, 6)" in str(e.value)
+    assert (
+        "Expected /\\n/ at position (1, 6) => 'first*'."
+    ) == str(e.value)
 
     # A case when the match is the root rule
     def grammar():
@@ -236,4 +241,6 @@ def test_reporting_newline_symbols_when_not_matched():
     with pytest.raises(NoMatch) as e:
         _ = parser.parse('something')
 
-    assert "Expected grammar at position (1, 1)" in str(e.value)
+    assert (
+        "Expected 'root\\nrule' at position (1, 1) => '*something'."
+    ) == str(e.value)

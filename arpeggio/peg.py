@@ -276,7 +276,8 @@ class ParserPEG(Parser):
                 self.parser_model, "{}_peg_parser_model.dot".format(root_rule))
 
     def _parse(self):
-        return self.parser_model.parse(self)
+        # WIP: No need to pass weakly?
+        return self.parser_model.parse(self, [])
 
     def _from_peg(self, language_def):
         parser = ParserPython(peggrammar, comment, reduce_tree=False,

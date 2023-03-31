@@ -25,4 +25,9 @@ def test_optional_in_choice():
     with pytest.raises(NoMatch) as e:
         parser.parse(input_str)
 
-    assert "Expected 'first' or EOF" in str(e.value)
+    assert (
+        # FIXME: Does it make sense to change this to the following?
+        # "Expected "
+        # "'first' or 'second' or 'third' or EOF at position (1, 1) => '*second'."
+        "Expected 'first' or EOF at position (1, 1) => '*second'."
+   ) == str(e.value)

@@ -13,6 +13,7 @@
 
 from __future__ import print_function, unicode_literals
 import sys
+import typing
 from collections import OrderedDict
 import codecs
 import re
@@ -62,8 +63,8 @@ class NoMatch(Exception):
     match is not successful.
 
     Args:
-        rules (list of ParsingExpression): Rules that are tried at the position
-            of the exception.
+        rules (list of Union[ParsingExpression, NoMatch]): Rules that are tried
+            at the position of the exception.
         position (int): A position in the input stream where exception
             occurred.
         parser (Parser): An instance of a parser.
@@ -72,43 +73,80 @@ class NoMatch(Exception):
         self.rules = rules
         self.position = position
         self.parser = parser
+        self.line = None
+        self.col = None
+        self.several_positions = None
+        self.failed_position = position
 
+        failed_position_different = False
+        for rule_or_nomatch in self.rules:
+            if isinstance(rule_or_nomatch, NoMatch):
+                if not failed_position_different:
+                    if self.failed_position < rule_or_nomatch.failed_position:
+                        self.failed_position = rule_or_nomatch.failed_position
+                        failed_position_different = True
+                else:
+                    if (
+                        self.position < rule_or_nomatch.failed_position < self.failed_position
+                    ):
+                        self.failed_position = rule_or_nomatch.failed_position
+
+    def get_diagnostics(self):
+        raise NotImplementedError()
+
+    def get_diagnostics_and_position(self):
+        diagnostics = self.get_diagnostics()
+        line, col = self.parser.pos_to_linecol(self.failed_position)
+        position = f"at position ({line}, {col})"
+        return diagnostics + " " + position
 
     def eval_attrs(self):
         """
         Call this to evaluate `message`, `context`, `line` and `col`. Called by __str__.
         """
-        def rule_to_exp_str(rule):
-            if hasattr(rule, '_exp_str'):
-                # Rule may override expected report string
-                return rule._exp_str
-            elif rule.root:
-                return rule.rule_name
-            elif isinstance(rule, Match) and \
-                    not isinstance(rule, EndOfFile):
-                return "'{}'".format(rule.to_match.replace('\n', '\\n'))
-            else:
-                return rule.name
+        assert (
+            self.rules and len(self.rules) > 0
+        ), "Is there a case when we don't have failed rules?"
 
-        if not self.rules:
-            self.message = "Not expected input"
+        several_positions = False
+        current_failed_position = None
+        for rule in self.rules:
+            if not isinstance(rule, NoMatch):
+                continue
+            if current_failed_position is None:
+                current_failed_position = rule.failed_position
+                continue
+            if current_failed_position != rule.failed_position:
+                several_positions = True
+                break
+            current_failed_position = rule.failed_position
+
+        messages = []
+        if several_positions:
+            for rule_or_no_match in self.rules:
+                messages.append(rule_or_no_match.get_diagnostics_and_position())
         else:
-            what_is_expected = OrderedDict.fromkeys(
-                ["{}".format(rule_to_exp_str(r)) for r in self.rules])
-            what_str = " or ".join(what_is_expected)
-            self.message = "Expected {}".format(what_str)
+            for rule_or_no_match in self.rules:
+                messages.append(rule_or_no_match.get_diagnostics())
+        what_str = " or ".join(messages)
 
-        self.context = self.parser.context(position=self.position)
-        self.line, self.col = self.parser.pos_to_linecol(self.position)
+        self.message = "Expected {}".format(what_str)
+        self.context = self.parser.context(position=self.failed_position)
+        self.line, self.col = self.parser.pos_to_linecol(self.failed_position)
+        self.several_positions = several_positions
 
     def __str__(self):
         self.eval_attrs()
-        return "{} at position {}{} => '{}'."\
-            .format(self.message,
-                    "{}:".format(self.parser.file_name)
-                    if self.parser.file_name else "",
-                    (self.line, self.col),
-                    self.context)
+        message = self.message
+        file_name_part_or_none = (
+            "{}: ".format(self.parser.file_name) if self.parser.file_name else ""
+        )
+        at_position_part = (
+            f"at position {(self.line, self.col)} "
+            if not self.several_positions
+            else ""
+        )
+        return f"{file_name_part_or_none}{message} {at_position_part}=> '{self.context}'."
 
     def __unicode__(self):
         return self.__str__()
@@ -123,6 +161,77 @@ def flatten(_iterable):
         else:
             result.append(e)
     return result
+
+
+class SeparatorNoMatchException(NoMatch):
+    def __init__(self, rules, position, parser):
+        super().__init__(rules, position, parser)
+
+        # WIP: Discuss with Igor: Can we skip whitespace outside StrMatch
+        # to avoid dealing re-calculating position vs failed_position.
+        self.failed_position = position
+
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class StringNoMatch(NoMatch):
+    """The simplest of all NoMatch classes. It simply stores a StrMatch node."""
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class RegExNoMatch(NoMatch):
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class OptionalNoMatch(NoMatch):
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class NotNoMatch(NoMatch):
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class EOFNoMatch(NoMatch):
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class SequenceNoMatch(NoMatch):
+    # Sequence fails if there is not a single match, however, there are also
+    # failed optionals that might be hit along the way, so using "or".
+    def get_diagnostics(self):
+        return " or ".join(map(lambda r: r.get_diagnostics(), self.rules))
+
+
+class ZeroOrMoreNoMatch(NoMatch):
+    def get_diagnostics(self):
+        assert len(self.rules) == 1
+        return self.rules[0].get_diagnostics()
+
+
+class OrderedChoiceNoMatch(NoMatch):
+    def get_diagnostics(self):
+        return " or ".join(map(lambda r: r.get_diagnostics(), self.rules))
+
+
+class UnorderedGroupNoMatch(NoMatch):
+    def get_diagnostics(self):
+        # Question:
+        # Here, we need to understand how to present that the failed members
+        # of the group have failed. For now, it is "or" but should this be
+        # "a | b | c"?
+        return " or ".join(map(lambda r: r.get_diagnostics(), self.rules))
 
 
 class DebugPrinter(object):
@@ -240,7 +349,8 @@ class ParsingExpression(object):
                 processed.add(node)
                 node._clear_cache(processed)
 
-    def parse(self, parser):
+    def parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
 
         if parser.debug:
             name = self.name
@@ -297,11 +407,10 @@ class ParsingExpression(object):
             parser.in_rule = self.rule_name
 
         try:
-            result = self._parse(parser)
+            result = self._parse(parser, weakly_failed_rules)
             if self.suppress or (type(result) is list and
                                  result and result[0] is None):
                 result = None
-
         except NoMatch:
             parser.position = c_pos  # Backtracking
             # Memoize NoMatch at this position for this rule
@@ -348,6 +457,19 @@ class ParsingExpression(object):
 
         return result
 
+    def get_diagnostics(self):
+        # WIP: None of the existing tests reaches here.
+        # The code from rule_to_exp_str is preserved here.
+        # The tests have to be written to reach this:
+        # if hasattr(self, '_exp_str'):
+        #     # Rule may override expected report string
+        #     return self._exp_str
+        # elif self.root:
+        #     return self.rule_name
+        # else:
+        #     return self.name
+        raise NotImplementedError
+
 
 class Sequence(ParsingExpression):
     """
@@ -359,7 +481,9 @@ class Sequence(ParsingExpression):
         self.ws = kwargs.pop('ws', None)
         self.skipws = kwargs.pop('skipws', None)
 
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         results = []
         c_pos = parser.position
 
@@ -374,15 +498,18 @@ class Sequence(ParsingExpression):
         # Prefetching
         append = results.append
 
+        weakly_failed_rules = []
         try:
             for e in self.nodes:
-                result = e.parse(parser)
+                result = e.parse(parser, weakly_failed_rules)
                 if result is not None:
                     append(result)
-
-        except NoMatch:
+        except NoMatch as no_match_exc:
+            parser.nm = SequenceNoMatch(
+                weakly_failed_rules + [no_match_exc], parser.position, parser
+            )
             parser.position = c_pos     # Backtracking
-            raise
+            raise parser.nm
 
         finally:
             if self.ws is not None:
@@ -393,13 +520,24 @@ class Sequence(ParsingExpression):
         if results:
             return results
 
+    def get_diagnostics(self):
+        if len(self.nodes) == 1:
+            return self.nodes[0].get_diagnostics()
+        return (
+            "("
+            + " AND ".join(map(lambda n: n.get_diagnostics(), self.nodes))
+            + ")"
+        )
+
 
 class OrderedChoice(Sequence):
     """
     Will match one of the parser expressions specified. Parser will try to
     match expressions in the order they are defined.
     """
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         result = None
         match = False
         c_pos = parser.position
@@ -412,14 +550,16 @@ class OrderedChoice(Sequence):
             old_skipws = parser.skipws
             parser.skipws = self.skipws
 
+        failed_rules = []
         try:
             for e in self.nodes:
                 try:
-                    result = e.parse(parser)
+                    result = e.parse(parser, weakly_failed_rules)
                     match = True
                     result = [result]
                     break
-                except NoMatch:
+                except NoMatch as no_match:
+                    failed_rules.append(no_match)
                     parser.position = c_pos  # Backtracking
         finally:
             if self.ws is not None:
@@ -428,9 +568,18 @@ class OrderedChoice(Sequence):
                 parser.skipws = old_skipws
 
         if not match:
-            parser._nm_raise(self, c_pos, parser)
+            assert len(failed_rules) > 0
+            parser.nm = OrderedChoiceNoMatch(failed_rules, c_pos, parser)
+            raise parser.nm
 
         return result
+
+    def get_diagnostics(self):
+        if len(self.nodes) == 1:
+            return self.nodes.get_diagnostics()
+        return (
+            " or ".join(map(lambda n: n.get_diagnostics(), self.nodes))
+        )
 
 
 class Repetition(ParsingExpression):
@@ -451,16 +600,21 @@ class Optional(Repetition):
     Optional will try to match parser expression specified and will not fail
     in case match is not successful.
     """
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         result = None
         c_pos = parser.position
 
         try:
-            result = [self.nodes[0].parse(parser)]
-        except NoMatch:
+            result = [self.nodes[0].parse(parser, weakly_failed_rules)]
+        except NoMatch as no_match_exc_:
             parser.position = c_pos  # Backtracking
-
+            weakly_failed_rules.append(OptionalNoMatch([no_match_exc_], c_pos, parser))
         return result
+
+    def get_diagnostics(self):
+        return self.nodes[0].get_diagnostics()
 
 
 class ZeroOrMore(Repetition):
@@ -468,7 +622,8 @@ class ZeroOrMore(Repetition):
     ZeroOrMore will try to match parser expression specified zero or more
     times. It will never fail.
     """
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
         results = []
 
         if self.eolterm:
@@ -482,18 +637,21 @@ class ZeroOrMore(Repetition):
         p = self.nodes[0].parse
         sep = self.sep.parse if self.sep else None
         result = None
-
         while True:
+            weakly_failed_rules__ = []
             try:
                 c_pos = parser.position
                 if sep and result:
-                    sep_result = sep(parser)
+                    sep_result = sep(parser, weakly_failed_rules)
                     if sep_result:
                         append(sep_result)
-                result = p(parser)
+                result = p(parser, weakly_failed_rules__)
                 append(result)
-            except NoMatch:
+            except NoMatch as no_match_exc:
                 parser.position = c_pos  # Backtracking
+                weakly_failed_rules.append(
+                    ZeroOrMoreNoMatch([no_match_exc], c_pos, parser)
+                )
                 break
 
         if self.eolterm:
@@ -507,7 +665,9 @@ class OneOrMore(Repetition):
     """
     OneOrMore will try to match parser expression specified one or more times.
     """
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         results = []
         first = True
 
@@ -528,18 +688,19 @@ class OneOrMore(Repetition):
                 try:
                     c_pos = parser.position
                     if sep and result:
-                        sep_result = sep(parser)
+                        sep_result = sep(parser, weakly_failed_rules)
                         if sep_result:
                             append(sep_result)
-                    result = p(parser)
+                    result = p(parser, weakly_failed_rules)
                     append(result)
                     first = False
-                except NoMatch:
+                except NoMatch as no_match_exc:
                     parser.position = c_pos  # Backtracking
 
                     if first:
                         raise
-
+                    else:
+                        weakly_failed_rules.append(no_match_exc)
                     break
         finally:
             if self.eolterm:
@@ -553,7 +714,9 @@ class UnorderedGroup(Repetition):
     """
     Will try to match all the parsing expressions in any order.
     """
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         results = []
         c_pos = parser.position
 
@@ -566,10 +729,12 @@ class UnorderedGroup(Repetition):
         # Prefetching
         append = results.append
         nodes_to_try = list(self.nodes)
+        failed_nodes = {}
         sep = self.sep.parse if self.sep else None
         result = None
         sep_result = None
         first = True
+        failed_position = c_pos
 
         while nodes_to_try:
             sep_exc = None
@@ -577,36 +742,68 @@ class UnorderedGroup(Repetition):
             # Separator
             c_loc_pos_sep = parser.position
             if sep and not first:
+                # WIP: Unused?
+                sep_weakly_failed_rules = []
                 try:
-                    sep_result = sep(parser)
-                except NoMatch as e:
+                    sep_result = sep(parser, sep_weakly_failed_rules)
+                except NoMatch as separator_no_match_exc_:
+                    separator_no_match_exc = SeparatorNoMatchException(
+                        [separator_no_match_exc_], c_loc_pos_sep, parser
+                    )
+                    if sep not in failed_nodes:
+                        failed_nodes[self.sep] = separator_no_match_exc
+
                     parser.position = c_loc_pos_sep     # Backtracking
 
                     # This still might be valid if all remaining subexpressions
                     # are optional and none of them will match
-                    sep_exc = e
+                    sep_exc = separator_no_match_exc
 
             c_loc_pos = parser.position
             match = True
-            all_optionals_fail = True
+            all_optionals_fail = False
             for e in list(nodes_to_try):
                 try:
-                    result = e.parse(parser)
+                    node_weakly_failed_rules = []
+                    result = e.parse(parser, node_weakly_failed_rules)
                     if result:
                         if sep_exc:
                             raise sep_exc
                         if sep_result:
                             append(sep_result)
+                            sep_result = None
                         first = False
                         match = True
                         all_optionals_fail = False
                         append(result)
                         nodes_to_try.remove(e)
                         break
-
-                except NoMatch:
+                    else:
+                        # WIP: Double-check which cases lead to assert:
+                        # if weak_no_match_exc is not None
+                        # We reach here if an expression that always succeeds
+                        # was not matched (e.g., Not or Optional).
+                        if len(node_weakly_failed_rules) > 0:
+                            assert len(node_weakly_failed_rules) == 1, node_weakly_failed_rules
+                            if sep_result is not None:
+                                match = False
+                            else:
+                                if len(nodes_to_try) == 1:
+                                    nodes_to_try.remove(e)
+                            failed_nodes[e] = node_weakly_failed_rules[0]
+                        else:
+                            # WIP: Should this case be made more explicit?
+                            pass
+                except SeparatorNoMatchException as separator_exc:
+                    match = False
+                    parser.position = c_loc_pos  # local backtracking
+                    failed_position = separator_exc.failed_position
+                    failed_nodes[self.sep] = separator_exc
+                except NoMatch as no_match_exc:
                     match = False
                     parser.position = c_loc_pos     # local backtracking
+                    failed_position = no_match_exc.position
+                    failed_nodes[e] = no_match_exc
 
             if not match or all_optionals_fail:
                 # If sep is matched backtrack it
@@ -618,13 +815,14 @@ class UnorderedGroup(Repetition):
             parser.eolterm = old_eolterm
 
         if not match:
-            # Unsuccessful match of the whole PE - full backtracking
+            parser.nm = UnorderedGroupNoMatch(failed_nodes.values(), failed_position, parser)
             parser.position = c_pos
-            parser._nm_raise(self, c_pos, parser)
-
+            raise parser.nm
         if results:
             return results
 
+    def get_diagnostics(self):
+        raise NotImplementedError
 
 class SyntaxPredicate(ParsingExpression):
     """
@@ -639,15 +837,21 @@ class And(SyntaxPredicate):
     This predicate will succeed if the specified expression matches current
     input.
     """
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         c_pos = parser.position
         for e in self.nodes:
             try:
-                e.parse(parser)
+                e.parse(parser, weakly_failed_rules)
             except NoMatch:
                 parser.position = c_pos
                 raise
         parser.position = c_pos
+
+    def get_diagnostics(self):
+        assert len(self.nodes) == 1
+        return self.nodes[0].get_diagnostics()
 
 
 class Not(SyntaxPredicate):
@@ -655,28 +859,41 @@ class Not(SyntaxPredicate):
     This predicate will succeed if the specified expression doesn't match
     current input.
     """
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         c_pos = parser.position
         old_in_not = parser.in_not
         parser.in_not = True
         try:
             for e in self.nodes:
                 try:
-                    e.parse(parser)
-                except NoMatch:
+                    # WIP: No need to pass weakly?
+                    e.parse(parser, [])
+                except NoMatch as no_match_exc:
+                    current_position = parser.position
                     parser.position = c_pos
-                    return
+                    weakly_failed_rules.append(NotNoMatch([self], current_position, parser))
+                    return None
+
+            parser.nm = NotNoMatch([self], parser.position, parser)
             parser.position = c_pos
-            parser._nm_raise(self, c_pos, parser)
+            raise parser.nm
         finally:
             parser.in_not = old_in_not
+
+    def get_diagnostics(self):
+        nodes_str = self.nodes[0].get_diagnostics()
+        return f"not({nodes_str})"
 
 
 class Empty(SyntaxPredicate):
     """
     This predicate will always succeed without consuming input.
     """
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         pass
 
 
@@ -695,7 +912,9 @@ class Combine(Decorator):
     This rules will always return a Terminal parse tree node.
     Whitespaces will be preserved. Comments will not be matched.
     """
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         results = []
 
         oldin_lex_rule = parser.in_lex_rule
@@ -703,7 +922,7 @@ class Combine(Decorator):
         c_pos = parser.position
         try:
             for parser_model_node in self.nodes:
-                results.append(parser_model_node.parse(parser))
+                results.append(parser_model_node.parse(parser, weakly_failed_rules))
 
             results = flatten(results)
 
@@ -742,8 +961,10 @@ class Match(ParsingExpression):
                     while True:
                         # TODO: Consumed whitespaces and comments should be
                         #       attached to the first match ahead.
+                        # WIP: No need to pass weakly?
                         parser.comments.append(
-                            parser.comments_model.parse(parser))
+                            parser.comments_model.parse(parser, [])
+                        )
                         if parser.skipws:
                             # Whitespace skipping
                             pos = parser.position
@@ -760,7 +981,8 @@ class Match(ParsingExpression):
         finally:
             parser.in_parse_comments = False
 
-    def parse(self, parser):
+    def parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
 
         if parser.skipws and not parser.in_lex_rule:
             # Whitespace skipping
@@ -790,7 +1012,7 @@ class Match(ParsingExpression):
                 self._parse_comments(parser)
                 parser.comment_positions[comment_start] = parser.position
 
-        result = self._parse(parser)
+        result = self._parse(parser, weakly_failed_rules)
         if not self.suppress:
             return result
 
@@ -841,7 +1063,9 @@ class RegExMatch(Match):
     def __unicode__(self):
         return self.__str__()
 
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         c_pos = parser.position
         m = self.regex.match(parser.input, c_pos)
         if m:
@@ -856,7 +1080,11 @@ class RegExMatch(Match):
         else:
             if parser.debug:
                 parser.dprint("-- NoMatch at {}".format(c_pos))
-            parser._nm_raise(self, c_pos, parser)
+            parser.nm = RegExNoMatch([self], c_pos, parser)
+            raise parser.nm
+
+    def get_diagnostics(self):
+        return "/{}/".format(self.to_match.replace('\n', '\\n'))
 
 
 class StrMatch(Match):
@@ -874,7 +1102,9 @@ class StrMatch(Match):
         self.to_match = to_match
         self.ignore_case = ignore_case
 
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         c_pos = parser.position
         input_frag = parser.input[c_pos:c_pos+len(self.to_match)]
         if self.ignore_case:
@@ -887,7 +1117,11 @@ class StrMatch(Match):
                     "++ Match '{}' at {} => '{}'"
                     .format(self.to_match, c_pos,
                             parser.context(len(self.to_match))))
-            parser.position += len(self.to_match)
+
+            # If the expression matched is a subexpression of Not,
+            # we don't want to update the parser's position.
+            if not parser.in_not:
+                parser.position += len(self.to_match)
 
             # If this match is inside sequence than mark for suppression
             suppress = type(parser.last_pexpression) is Sequence
@@ -899,7 +1133,8 @@ class StrMatch(Match):
                     "-- No match '{}' at {} => '{}'"
                     .format(self.to_match, c_pos,
                             parser.context(len(self.to_match))))
-            parser._nm_raise(self, c_pos, parser)
+            parser.nm = StringNoMatch([self], c_pos, parser)
+            raise parser.nm
 
     def __str__(self):
         return self.to_match
@@ -913,6 +1148,8 @@ class StrMatch(Match):
     def __hash__(self):
         return hash(self.to_match)
 
+    def get_diagnostics(self):
+        return "'{}'".format(self.to_match.replace('\n', '\\n'))
 
 
 # HACK: Kwd class is a bit hackish. Need to find a better way to
@@ -939,15 +1176,21 @@ class EndOfFile(Match):
     def name(self):
         return "EOF"
 
-    def _parse(self, parser):
+    def _parse(self, parser, weakly_failed_rules: typing.List):
+        assert isinstance(weakly_failed_rules, list)
+
         c_pos = parser.position
         if len(parser.input) == c_pos:
             return Terminal(EOF(), c_pos, '', suppress=True)
         else:
             if parser.debug:
                 parser.dprint("!! EOF not matched.")
-            parser._nm_raise(self, c_pos, parser)
 
+            parser.nm = EOFNoMatch([self], c_pos, parser)
+            raise parser.nm
+
+    def get_diagnostics(self):
+        return "EOF"
 
 def EOF():
     return EndOfFile()
@@ -1408,10 +1651,6 @@ class Parser(DebugPrinter):
             traversed.
     """
 
-    # Not marker for NoMatch rules list. Used if the first unsuccessful rule
-    # match is Not.
-    FIRST_NOT = Not()
-
     def __init__(self, skipws=True, ws=None, reduce_tree=False, autokwd=False,
                  ignore_case=False, memoization=False, **kwargs):
         """
@@ -1519,9 +1758,6 @@ class Parser(DebugPrinter):
         try:
             self.parse_tree = self._parse()
         except NoMatch as e:
-            # Remove Not marker
-            if e.rules[0] is Parser.FIRST_NOT:
-                del e.rules[0]
             # Get line and column from position
             e.line, e.col = self.pos_to_linecol(e.position)
             raise
@@ -1699,28 +1935,6 @@ class Parser(DebugPrinter):
 
         return retval.replace('\n', ' ').replace('\r', '')
 
-    def _nm_raise(self, *args):
-        """
-        Register new NoMatch object if the input is consumed
-        from the last NoMatch and raise last NoMatch.
-
-        Args:
-            args: A NoMatch instance or (value, position, parser)
-        """
-
-        rule, position, parser = args
-        if self.nm is None or not parser.in_parse_comments:
-            if self.nm is None or position > self.nm.position:
-                if self.in_not:
-                    self.nm = NoMatch([Parser.FIRST_NOT], position, parser)
-                else:
-                    self.nm = NoMatch([rule], position, parser)
-            elif position == self.nm.position and isinstance(rule, Match) \
-                    and not self.in_not:
-                self.nm.rules.append(rule)
-
-        raise self.nm
-
     def _clear_caches(self):
         """
         Clear memoization caches if packrat parser is used.
@@ -1768,6 +1982,9 @@ class ParserPython(Parser):
             self.comments_model.root = True
             self.comments_model.rule_name = comment_def.__name__
 
+        # WIP:
+        # self.debug = True
+
         # In debug mode export parser model to dot for
         # visualization
         if self.debug:
@@ -1777,7 +1994,8 @@ class ParserPython(Parser):
                                        "{}_parser_model.dot".format(root_rule))
 
     def _parse(self):
-        return self.parser_model.parse(self)
+        hey = []
+        return self.parser_model.parse(self, hey)
 
     def _from_python(self, expression):
         """

@@ -97,8 +97,8 @@ class NoMatch(Exception):
     def get_diagnostics_and_position(self):
         diagnostics = self.get_diagnostics()
         line, col = self.parser.pos_to_linecol(self.failed_position)
-        position = f"at position ({line}, {col})"
-        return diagnostics + " " + position
+        position = f"{line}:{col}:"
+        return f"{position} {diagnostics}"
 
     def eval_attrs(self):
         """
@@ -128,9 +128,9 @@ class NoMatch(Exception):
         else:
             for rule_or_no_match in self.rules:
                 messages.append(rule_or_no_match.get_diagnostics())
-        what_str = " or ".join(messages)
+        what_str = "\n".join(messages) + "\n"
 
-        self.message = "Expected {}".format(what_str)
+        self.message = "Expected the following alternative inputs:\n{}".format(what_str)
         self.context = self.parser.context(position=self.failed_position)
         self.line, self.col = self.parser.pos_to_linecol(self.failed_position)
         self.several_positions = several_positions

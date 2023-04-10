@@ -108,31 +108,49 @@ class NoMatch(Exception):
             self.rules and len(self.rules) > 0
         ), "Is there a case when we don't have failed rules?"
 
+        flattened_pos_rules = []
+        queue = list([self])
+        while len(queue) > 0:
+            current = queue.pop(0)
+            for rule in current.rules:
+                if isinstance(rule, NotNoMatch):
+                    continue
+                if not isinstance(rule, NoMatch):
+                    flattened_pos_rules.append((current.position, rule))
+                else:
+                    queue.append(rule)
+
         several_positions = False
         current_failed_position = None
-        for rule in self.rules:
-            if not isinstance(rule, NoMatch):
-                continue
+        for pos_rule in flattened_pos_rules:
             if current_failed_position is None:
-                current_failed_position = rule.failed_position
+                current_failed_position = pos_rule[0]
                 continue
-            if current_failed_position != rule.failed_position:
+            if current_failed_position != pos_rule[0]:
                 several_positions = True
-                break
-            current_failed_position = rule.failed_position
+            if current_failed_position < pos_rule[0]:
+                current_failed_position = pos_rule[0]
+
+        flattened_pos_rules_ = []
+        flattened_pos_rules.sort(key=lambda pos_rule_: pos_rule_[0])
+        for pos_rule in flattened_pos_rules:
+            if current_failed_position - pos_rule[0] < 20:
+                flattened_pos_rules_.append(pos_rule)
+        flattened_pos_rules = flattened_pos_rules_
 
         messages = []
-        if several_positions:
-            for rule_or_no_match in self.rules:
-                messages.append(rule_or_no_match.get_diagnostics_and_position())
+        if False and several_positions:
+            for rule_or_no_match in flattened_pos_rules:
+                messages.append(f"{rule_or_no_match[0]}:" + rule_or_no_match[1].get_diagnostics_and_position())
         else:
-            for rule_or_no_match in self.rules:
-                messages.append(rule_or_no_match.get_diagnostics())
+            for rule_or_no_match in flattened_pos_rules:
+                posi = self.parser.pos_to_linecol(rule_or_no_match[0])
+                messages.append(f"{posi[0]}:{posi[1]}".ljust(10, ' ') + rule_or_no_match[1].get_diagnostics())
         what_str = "\n".join(messages) + "\n"
 
         self.message = "Expected the following alternative inputs:\n{}".format(what_str)
-        self.context = self.parser.context(position=self.failed_position)
-        self.line, self.col = self.parser.pos_to_linecol(self.failed_position)
+        self.context = self.parser.context(position=current_failed_position)
+        self.line, self.col = self.parser.pos_to_linecol(current_failed_position)
         self.several_positions = several_positions
 
     def __str__(self):
@@ -639,14 +657,13 @@ class ZeroOrMore(Repetition):
         result = None
         weakly_failed_rules = []
         while True:
-            weakly_failed_rules__ = []
             try:
                 c_pos = parser.position
                 if sep and result:
                     sep_result = sep(parser, weakly_failed_rules)
                     if sep_result:
                         append(sep_result)
-                result = p(parser, weakly_failed_rules__)
+                result = p(parser, weakly_failed_rules)
                 append(result)
             except NoMatch as no_match_exc:
                 parser.position = c_pos  # Backtracking
@@ -888,7 +905,7 @@ class Not(SyntaxPredicate):
                     e.parse(parser, out_weakly_failed_rules=None)
                 except NoMatch:
                     parser.position = c_pos
-                    weakly_failed_rules.append(NotNoMatch([self], c_pos, parser))
+                    # weakly_failed_rules.append(NotNoMatch([self], c_pos, parser))
                     return None
 
             parser.nm = NotNoMatch([self], c_pos, parser)

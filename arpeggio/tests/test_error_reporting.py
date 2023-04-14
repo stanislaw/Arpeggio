@@ -54,9 +54,13 @@ def test_optional_with_better_match():
         parser.parse('one two three four 5')
 
     assert (
-       "Expected 'five' at position (1, 20) => 'hree four *5'."
+        "Expected "
+        "'six' at position (1, 1) or "
+        "'4' at position (1, 15) or "
+        "'five' at position (1, 20) => "
+        "'*one two th'."
     ) == str(e.value)
-    assert (e.value.line, e.value.col) == (1, 20)
+    assert (e.value.line, e.value.col) == (1, 1)
 
 
 def test_alternative_added():
@@ -90,7 +94,7 @@ def test_file_name_reporting():
     with pytest.raises(NoMatch) as e:
         parser.parse("\n\n   a c", file_name="test_file.peg")
     assert (
-        "Expected 'b' at position test_file.peg:(3, 6) => '     a *c'."
+        "test_file.peg: Expected 'b' at position (3, 6) => '     a *c'."
     ) == str(e.value)
     assert (e.value.line, e.value.col) == (3, 6)
 

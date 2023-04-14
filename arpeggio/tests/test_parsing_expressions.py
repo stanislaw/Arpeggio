@@ -32,22 +32,23 @@ def test_ordered_choice():
         return ["a", "b", "c"], EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("b")
-
     assert str(parsed) == "b | "
     assert repr(parsed) == "[  'b' [0], EOF [1] ]"
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("c")
     assert str(parsed) == "c | "
     assert repr(parsed) == "[  'c' [0], EOF [1] ]"
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("ab")
     assert (
        "Expected EOF at position (1, 2) => 'a*b'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("bb")
     assert (
@@ -60,24 +61,25 @@ def test_unordered_group():
         return UnorderedGroup("a", "b", "c"), EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("b a c")
-
     assert str(parsed) == "b | a | c | "
     assert repr(parsed) == "[  'b' [0],  'a' [2],  'c' [4], EOF [5] ]"
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a b a c")
     assert (
        "Expected 'c' at position (1, 5) => 'a b *a c'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a c")
     assert (
        "Expected 'b' at position (1, 4) => 'a c*'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("b b a c")
     assert (
@@ -91,43 +93,47 @@ def test_unordered_group_with_separator():
         return UnorderedGroup("a", "b", "c", sep=StrMatch(",")), EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("b, a , c")
-
     assert str(parsed) == "b | , | a | , | c | "
     assert repr(parsed) == \
         "[  'b' [0],  ',' [1],  'a' [3],  ',' [5],  'c' [7], EOF [8] ]"
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a, b, a, c")
     assert (
        "Expected 'c' at position (1, 7) => 'a, b, *a, c'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a, c")
     assert (
-       "Expected ',' or 'b' at position (1, 5) => 'a, c*'."
+       "Expected 'b' or ',' at position (1, 5) => 'a, c*'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("b, b, a, c")
     assert (
        "Expected 'a' or 'c' at position (1, 4) => 'b, *b, a, c'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse(",a, b, c")
     assert (
        "Expected 'a' or 'b' or 'c' at position (1, 1) => '*,a, b, c'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a, b, c,")
     assert (
        "Expected EOF at position (1, 8) => 'a, b, c*,'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a, ,b, c")
     assert (
@@ -141,22 +147,25 @@ def test_unordered_group_with_optionals():
         return UnorderedGroup("a", Optional("b"), "c"), EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("b a c")
     assert str(parsed) == "b | a | c | "
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("a c b")
     assert str(parsed) == "a | c | b | "
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("a c")
     assert str(parsed) == "a | c | "
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a b c b")
     assert (
        "Expected EOF at position (1, 7) => 'a b c *b'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a b ")
     assert (
@@ -170,16 +179,18 @@ def test_unordered_group_with_optionals_and_separator():
         return UnorderedGroup("a", Optional("b"), "c", sep=","), EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("b, a, c")
     assert parsed
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("a, c, b")
     assert parsed
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("a, c")
     assert parsed
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a, b, c, b")
     assert (
@@ -187,12 +198,14 @@ def test_unordered_group_with_optionals_and_separator():
     ) == str(e.value)
 
     # FIXME: Shouldn't this only be ',' and the position 5?
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a, b ")
     assert (
        "Expected ',' or 'c' at position (1, 6) => 'a, b *'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a, c, ")
     assert (
@@ -200,12 +213,14 @@ def test_unordered_group_with_optionals_and_separator():
     ) == str(e.value)
 
     # FIXME: Shouldn't the ',' be at position 5?
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a, b c ")
     assert (
         "Expected ',' at position (1, 6) => 'a, b *c '."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse(",a, c ")
     assert (
@@ -219,18 +234,19 @@ def test_zero_or_more():
         return ZeroOrMore("a"), EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("aaaaaaa")
 
     assert str(parsed) == "a | a | a | a | a | a | a | "
     assert repr(parsed) == "[  'a' [0],  'a' [1],  'a' [2],"\
         "  'a' [3],  'a' [4],  'a' [5],  'a' [6], EOF [7] ]"
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("")
 
     assert str(parsed) == ""
     assert repr(parsed) == "[ EOF [0] ]"
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("bbb")
     assert (
@@ -244,7 +260,6 @@ def test_zero_or_more_with_separator():
         return ZeroOrMore("a", sep=","), EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("a, a , a , a ,  a,a, a")
 
     assert str(parsed) == \
@@ -254,29 +269,33 @@ def test_zero_or_more_with_separator():
         "'a' [11],  ',' [13],  'a' [16],  ',' [17],  'a' [18],  ',' [19],"\
         "  'a' [21], EOF [22] ]"
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("")
-
     assert str(parsed) == ""
     assert repr(parsed) == "[ EOF [0] ]"
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("aa a")
     assert (
        "Expected ',' or EOF at position (1, 2) => 'a*a a'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse(",a,a ,a")
     assert (
        "Expected 'a' or EOF at position (1, 1) => '*,a,a ,a'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a,a ,a,")
     assert (
        "Expected 'a' at position (1, 8) => 'a,a ,a,*'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("bbb")
     assert (
@@ -290,7 +309,6 @@ def test_zero_or_more_with_optional_separator():
         return ZeroOrMore("a", sep=RegExMatch(",?")), EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("a, a , a   a ,  a,a, a")
 
     assert str(parsed) == \
@@ -300,25 +318,29 @@ def test_zero_or_more_with_optional_separator():
         "'a' [11],  ',' [13],  'a' [16],  ',' [17],  'a' [18],  ',' [19],"\
         "  'a' [21], EOF [22] ]"
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("")
-
     assert str(parsed) == ""
     assert repr(parsed) == "[ EOF [0] ]"
 
+    parser = ParserPython(grammar)
     parser.parse("aa a")
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse(",a,a ,a")
     assert (
        "Expected 'a' or EOF at position (1, 1) => '*,a,a ,a'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a,a ,a,")
     assert (
        "Expected 'a' at position (1, 8) => 'a,a ,a,*'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("bbb")
     assert (
@@ -332,21 +354,23 @@ def test_one_or_more():
         return OneOrMore("a"), "b"
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("aaaaaa a  b")
 
     assert str(parsed) == "a | a | a | a | a | a | a | b"
     assert repr(parsed) == "[  'a' [0],  'a' [1],  'a' [2],"\
         "  'a' [3],  'a' [4],  'a' [5],  'a' [7],  'b' [10] ]"
 
+    parser = ParserPython(grammar)
     parser.parse("ab")
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("")
     assert (
        "Expected 'a' at position (1, 1) => '*'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("b")
     assert (
@@ -360,7 +384,6 @@ def test_one_or_more_with_separator():
         return OneOrMore("a", sep=","), "b"
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("a, a, a, a  b")
 
     assert str(parsed) == "a | , | a | , | a | , | a | b"
@@ -368,32 +391,38 @@ def test_one_or_more_with_separator():
         "[  'a' [0],  ',' [1],  'a' [3],  ',' [4],  'a' [6],  ',' [7],  "\
         "'a' [9],  'b' [12] ]"
 
+    parser = ParserPython(grammar)
     parser.parse("a b")
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("")
     assert (
        "Expected 'a' at position (1, 1) => '*'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("b")
     assert (
        "Expected 'a' at position (1, 1) => '*b'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a a b")
     assert (
        "Expected ',' or 'b' at position (1, 3) => 'a *a b'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a a, b")
     assert (
        "Expected ',' or 'b' at position (1, 3) => 'a *a, b'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse(", a, a b")
     assert (
@@ -407,7 +436,6 @@ def test_one_or_more_with_optional_separator():
         return OneOrMore("a", sep=RegExMatch(",?")), "b"
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("a, a  a, a  b")
 
     assert str(parsed) == "a | , | a | a | , | a | b"
@@ -415,26 +443,31 @@ def test_one_or_more_with_optional_separator():
         "[  'a' [0],  ',' [1],  'a' [3],  'a' [6],  ',' [7],  "\
         "'a' [9],  'b' [12] ]"
 
+    parser = ParserPython(grammar)
     parser.parse("a b")
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("")
     assert (
        "Expected 'a' at position (1, 1) => '*'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("b")
     assert (
        "Expected 'a' at position (1, 1) => '*b'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("a a, b")
     assert (
        "Expected 'a' at position (1, 6) => 'a a, *b'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse(", a, a b")
     assert (
@@ -448,23 +481,23 @@ def test_optional():
         return Optional("a"), "b", EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("ab")
-
     assert str(parsed) == "a | b | "
     assert repr(parsed) == "[  'a' [0],  'b' [1], EOF [2] ]"
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("b")
-
     assert str(parsed) == "b | "
     assert repr(parsed) == "[  'b' [0], EOF [1] ]"
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("aab")
     assert (
        "Expected 'b' at position (1, 2) => 'a*ab'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("")
     assert (
@@ -480,12 +513,12 @@ def test_and():
         return "a", And("b"), ["c", "b"], EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("ab")
     assert str(parsed) == "a | b | "
     assert repr(parsed) == "[  'a' [0],  'b' [1], EOF [2] ]"
 
     # 'And' will try to match 'b' and fail so 'c' will never get matched
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("ac")
     assert (
@@ -493,6 +526,7 @@ def test_and():
     ) == str(e.value)
 
     # 'And' will not consume 'b' from the input so second 'b' will never match
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("abb")
     assert (
@@ -506,13 +540,12 @@ def test_not():
         return "a", Not("b"), ["b", "c"], EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("ac")
-
     assert str(parsed) == "a | c | "
     assert repr(parsed) == "[  'a' [0],  'c' [1], EOF [2] ]"
 
     # Not will fail on 'b'
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("ab")
     assert (
@@ -520,6 +553,7 @@ def test_not():
     ) == str(e.value)
 
     # And will not consume 'c' from the input so 'b' will never match
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("acb")
     assert (

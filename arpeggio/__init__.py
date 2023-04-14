@@ -12,11 +12,15 @@
 ###############################################################################
 
 from __future__ import print_function, unicode_literals
+
+import collections
 import sys
 from collections import OrderedDict
 import codecs
 import re
 import bisect
+from typing import Tuple, List
+
 from arpeggio.utils import isstr
 import types
 
@@ -73,7 +77,6 @@ class NoMatch(Exception):
         self.position = position
         self.parser = parser
 
-
     def eval_attrs(self):
         """
         Call this to evaluate `message`, `context`, `line` and `col`. Called by __str__.
@@ -89,25 +92,56 @@ class NoMatch(Exception):
                 return "'{}'".format(rule.to_match.replace('\n', '\\n'))
             else:
                 return rule.name
+        flattened_pos_rules: List[Tuple] = []
+        queue = list(self.parser.weakly_failed_errors)
+        while len(queue) > 0:
+            current = queue.pop(0)
+            for rule in current.rules:
+                if not isinstance(rule, NoMatch):
+                    flattened_pos_rules.append((current.position, rule))
+                else:
+                    queue.append(rule)
+
+        several_positions = False
+        current_failed_position = None
+        for pos_rule in flattened_pos_rules:
+            if current_failed_position is None:
+                current_failed_position = pos_rule[0]
+                continue
+            if current_failed_position != pos_rule[0]:
+                several_positions = True
+            if current_failed_position > pos_rule[0]:
+                current_failed_position = pos_rule[0]
+
+        flattened_pos_rules.sort(key=lambda pos_rule_: pos_rule_[0])
+
+        self.context = self.parser.context(position=current_failed_position)
+        self.line, self.col = self.parser.pos_to_linecol(current_failed_position)
 
         if not self.rules:
             self.message = "Not expected input"
         else:
-            what_is_expected = OrderedDict.fromkeys(
-                ["{}".format(rule_to_exp_str(r)) for r in self.rules])
-            what_str = " or ".join(what_is_expected)
+            if not several_positions:
+                what_is_expected = OrderedDict.fromkeys(
+                    ["{}".format(rule_to_exp_str(r[1])) for r in flattened_pos_rules])
+                what_str = " or ".join(what_is_expected)
+                what_str += f" at position ({self.line}, {self.col})"
+            else:
+                descriptions = []
+                for r in flattened_pos_rules:
+                    expectation = rule_to_exp_str(r[1])
+                    descriptions.append(
+                        f"{expectation} at position {self.parser.pos_to_linecol(r[0])}"
+                    )
+                what_str = " or ".join(descriptions)
             self.message = "Expected {}".format(what_str)
-
-        self.context = self.parser.context(position=self.position)
-        self.line, self.col = self.parser.pos_to_linecol(self.position)
 
     def __str__(self):
         self.eval_attrs()
-        return "{} at position {}{} => '{}'."\
-            .format(self.message,
-                    "{}:".format(self.parser.file_name)
+        return "{}{} => '{}'."\
+            .format("{}: ".format(self.parser.file_name)
                     if self.parser.file_name else "",
-                    (self.line, self.col),
+                    self.message,
                     self.context)
 
     def __unicode__(self):
@@ -1473,6 +1507,8 @@ class Parser(DebugPrinter):
         # Last parsing expression traversed
         self.last_pexpression = None
 
+        self.weakly_failed_errors = collections.deque(maxlen=10)
+
     @property
     def ws(self):
         return self._ws
@@ -1715,6 +1751,7 @@ class Parser(DebugPrinter):
                     self.nm = NoMatch([Parser.FIRST_NOT], position, parser)
                 else:
                     self.nm = NoMatch([rule], position, parser)
+                    self.weakly_failed_errors.append(self.nm)
             elif position == self.nm.position and isinstance(rule, Match) \
                     and not self.in_not:
                 self.nm.rules.append(rule)

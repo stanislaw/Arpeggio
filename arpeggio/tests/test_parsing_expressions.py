@@ -448,23 +448,27 @@ def test_optional():
         return Optional("a"), "b", EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("ab")
 
+    parser = ParserPython(grammar)
     assert str(parsed) == "a | b | "
     assert repr(parsed) == "[  'a' [0],  'b' [1], EOF [2] ]"
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("b")
 
+    parser = ParserPython(grammar)
     assert str(parsed) == "b | "
     assert repr(parsed) == "[  'b' [0], EOF [1] ]"
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("aab")
     assert (
        "Expected 'b' at position (1, 2) => 'a*ab'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("")
     assert (

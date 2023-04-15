@@ -92,6 +92,7 @@ class NoMatch(Exception):
                 return "'{}'".format(rule.to_match.replace('\n', '\\n'))
             else:
                 return rule.name
+
         flattened_pos_rules: List[Tuple] = []
         queue = list(self.parser.weakly_failed_errors)
         while len(queue) > 0:
@@ -101,6 +102,9 @@ class NoMatch(Exception):
                     flattened_pos_rules.append((current.position, rule))
                 else:
                     queue.append(rule)
+
+        for rule in self.rules:
+            flattened_pos_rules.append((self.position, rule))
 
         several_positions = False
         current_failed_position = None
@@ -464,18 +468,7 @@ class OrderedChoice(Sequence):
         if not match:
             parser._nm_raise(self, c_pos, parser)
 
-        lookup = set(self.nodes)
 
-        elements_to_remove = []
-        for wfe in reversed(parser.weakly_failed_errors):
-            if wfe.position < c_pos:
-                break
-            for wfe_rule in wfe.rules:
-                if wfe_rule in lookup:
-                    elements_to_remove.append(wfe)
-                    break
-        for etr in elements_to_remove:
-            parser.weakly_failed_errors.remove(etr)
         return result
 
 
@@ -1763,7 +1756,6 @@ class Parser(DebugPrinter):
                     self.nm = NoMatch([Parser.FIRST_NOT], position, parser)
                 else:
                     self.nm = NoMatch([rule], position, parser)
-                    self.weakly_failed_errors.append(self.nm)
             elif position == self.nm.position and isinstance(rule, Match) \
                     and not self.in_not:
                 self.nm.rules.append(rule)

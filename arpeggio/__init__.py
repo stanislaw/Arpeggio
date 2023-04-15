@@ -19,7 +19,7 @@ from collections import OrderedDict
 import codecs
 import re
 import bisect
-from typing import Tuple, List
+from typing import Tuple, List, Deque
 
 from arpeggio.utils import isstr
 import types
@@ -464,6 +464,18 @@ class OrderedChoice(Sequence):
         if not match:
             parser._nm_raise(self, c_pos, parser)
 
+        lookup = set(self.nodes)
+
+        elements_to_remove = []
+        for wfe in reversed(parser.weakly_failed_errors):
+            if wfe.position < c_pos:
+                break
+            for wfe_rule in wfe.rules:
+                if wfe_rule in lookup:
+                    elements_to_remove.append(wfe)
+                    break
+        for etr in elements_to_remove:
+            parser.weakly_failed_errors.remove(etr)
         return result
 
 
@@ -1507,7 +1519,7 @@ class Parser(DebugPrinter):
         # Last parsing expression traversed
         self.last_pexpression = None
 
-        self.weakly_failed_errors = collections.deque(maxlen=10)
+        self.weakly_failed_errors: Deque[NoMatch] = collections.deque(maxlen=10)
 
     @property
     def ws(self):

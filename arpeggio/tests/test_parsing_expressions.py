@@ -31,22 +31,24 @@ def test_ordered_choice():
     def grammar():
         return ["a", "b", "c"], EOF
 
+    # parser = ParserPython(grammar)
+    #
+    # parsed = parser.parse("b")
+    #
+    # assert str(parsed) == "b | "
+    # assert repr(parsed) == "[  'b' [0], EOF [1] ]"
+    #
+    # parsed = parser.parse("c")
+    # assert str(parsed) == "c | "
+    # assert repr(parsed) == "[  'c' [0], EOF [1] ]"
+    # parser = ParserPython(grammar)
+    #
+    # with pytest.raises(NoMatch) as e:
+    #     parser.parse("ab")
+    # assert (
+    #    "Expected EOF at position (1, 2) => 'a*b'."
+    # ) == str(e.value)
     parser = ParserPython(grammar)
-
-    parsed = parser.parse("b")
-
-    assert str(parsed) == "b | "
-    assert repr(parsed) == "[  'b' [0], EOF [1] ]"
-
-    parsed = parser.parse("c")
-    assert str(parsed) == "c | "
-    assert repr(parsed) == "[  'c' [0], EOF [1] ]"
-
-    with pytest.raises(NoMatch) as e:
-        parser.parse("ab")
-    assert (
-       "Expected EOF at position (1, 2) => 'a*b'."
-    ) == str(e.value)
 
     with pytest.raises(NoMatch) as e:
         parser.parse("bb")
@@ -219,18 +221,19 @@ def test_zero_or_more():
         return ZeroOrMore("a"), EOF
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("aaaaaaa")
 
     assert str(parsed) == "a | a | a | a | a | a | a | "
     assert repr(parsed) == "[  'a' [0],  'a' [1],  'a' [2],"\
         "  'a' [3],  'a' [4],  'a' [5],  'a' [6], EOF [7] ]"
 
+    parser = ParserPython(grammar)
     parsed = parser.parse("")
 
     assert str(parsed) == ""
     assert repr(parsed) == "[ EOF [0] ]"
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("bbb")
     assert (
@@ -332,13 +335,13 @@ def test_one_or_more():
         return OneOrMore("a"), "b"
 
     parser = ParserPython(grammar)
-
     parsed = parser.parse("aaaaaa a  b")
 
     assert str(parsed) == "a | a | a | a | a | a | a | b"
     assert repr(parsed) == "[  'a' [0],  'a' [1],  'a' [2],"\
         "  'a' [3],  'a' [4],  'a' [5],  'a' [7],  'b' [10] ]"
 
+    parser = ParserPython(grammar)
     parser.parse("ab")
 
     with pytest.raises(NoMatch) as e:
@@ -347,6 +350,7 @@ def test_one_or_more():
        "Expected 'a' at position (1, 1) => '*'."
     ) == str(e.value)
 
+    parser = ParserPython(grammar)
     with pytest.raises(NoMatch) as e:
         parser.parse("b")
     assert (

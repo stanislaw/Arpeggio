@@ -12,6 +12,8 @@
 ###############################################################################
 
 from __future__ import print_function, unicode_literals
+
+import collections
 import sys
 from collections import OrderedDict
 import codecs
@@ -1387,6 +1389,22 @@ class SemanticActionToString(SemanticAction):
 # Parsers
 
 
+class ReusablePool:
+    """
+    Manage Reusable objects for use by Client objects.
+    """
+
+    def __init__(self):
+        # self.reusables = []
+        self.reusables = collections.deque()
+
+    def acquire(self):
+        return self.reusables.popleft()
+
+    def release(self, reusable):
+        self.reusables.append(reusable)
+
+
 class Parser(DebugPrinter):
     """
     Abstract base class for all parsers.
@@ -1429,6 +1447,8 @@ class Parser(DebugPrinter):
         """
 
         super(Parser, self).__init__(**kwargs)
+        self.counter = 0
+        self.reusable_pool = ReusablePool()
 
         # Used to indicate state in which parser should not
         # treat newlines as whitespaces.
@@ -1538,6 +1558,7 @@ class Parser(DebugPrinter):
             root_rule_name = self.parse_tree.rule_name
             PTDOTExporter().exportFile(
                 self.parse_tree, "{}_parse_tree.dot".format(root_rule_name))
+        print(f"Parser: {self.file_name} {self.counter}")
         return self.parse_tree
 
     def parse_file(self, file_name):
@@ -1712,9 +1733,31 @@ class Parser(DebugPrinter):
         if self.nm is None or not parser.in_parse_comments:
             if self.nm is None or position > self.nm.position:
                 if self.in_not:
-                    self.nm = NoMatch([Parser.FIRST_NOT], position, parser)
+                    # self.nm = NoMatch([Parser.FIRST_NOT], position, parser)
+                    if parser.reusable_pool.reusables:
+                        existing = parser.reusable_pool.acquire()
+                        existing.rules = [Parser.FIRST_NOT]
+                        existing.position = position
+                        existing.parser = parser
+                    else:
+                        existing = NoMatch([Parser.FIRST_NOT], position, parser)
+                        parser.counter += 1
+                    if self.nm is not None:
+                        parser.reusable_pool.release(self.nm)
+                    self.nm = existing
                 else:
-                    self.nm = NoMatch([rule], position, parser)
+                    # self.nm = NoMatch([rule], position, parser)
+                    if parser.reusable_pool.reusables:
+                        existing = parser.reusable_pool.acquire()
+                        existing.rules = [rule]
+                        existing.position = position
+                        existing.parser = parser
+                    else:
+                        parser.counter += 1
+                        existing = NoMatch([rule], position, parser)
+                    if self.nm is not None:
+                        parser.reusable_pool.release(self.nm)
+                    self.nm = existing
             elif position == self.nm.position and isinstance(rule, Match) \
                     and not self.in_not:
                 self.nm.rules.append(rule)
